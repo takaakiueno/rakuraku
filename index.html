@@ -1,6 +1,3 @@
-
-
-Index7 · HTML
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -65,14 +62,14 @@ Index7 · HTML
   button:disabled { opacity: .5; cursor: default; }
   #msg { margin-top: 12px; font-size: 14px; min-height: 1.6em; }
   #msg.error { color: var(--warn); }
- 
+
   .scroll { overflow-x: auto; }
   table { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
   th, td { border: 1px solid var(--line); padding: 3px 8px; text-align: center; white-space: nowrap; }
   th { background: var(--soft); font-weight: 600; }
   .dist { font-size: 14px; margin: 4px 0; }
   .note { font-size: 13px; color: var(--sub); margin: 8px 0 0; }
- 
+
   table.sched { font-size: 16px; }
   table.sched th, table.sched td { padding: 5px 14px; }
   table.sched td.game { font-weight: 600; min-width: 120px; }
@@ -83,7 +80,7 @@ Index7 · HTML
   table.sched tr.done td.game { color: #a9b3ac; font-weight: 400; }
   table.sched tr.next td { background: var(--next); }
   table.sched tr.next td.tag { color: #8a5a00; font-weight: 600; }
- 
+
   @media print {
     body { background: #fff; }
     .noprint { display: none !important; }
@@ -94,7 +91,7 @@ Index7 · HTML
 <body>
 <main>
   <h1>テニス 固定ペア総当たり 対戦表</h1>
- 
+
   <div class="card noprint">
     <form id="form">
       <label class="field">組数
@@ -107,13 +104,13 @@ Index7 · HTML
     <p class="note">チェックすると、最後まで消化したときの待ちが少し減ります。途中で打ち切ると、試合数が2試合違うペアが出ることがあります。</p>
     <div id="msg"></div>
   </div>
- 
+
   <div id="result"></div>
 </main>
- 
+
 <script>
 "use strict";
- 
+
 /* ===== 対戦順の決め方 =====
    n 組の総当たりは n(n-1)/2 試合。1面で1試合ずつ行うので、決めるのは「試合の順番」だけ。
    次の3つの条件を、上から順に優先して満たす順番を探す。
@@ -122,9 +119,9 @@ Index7 · HTML
      3. 途中で打ち切っても公平: どの時点で終わっても、各ペアの消化試合数の差が1以内(これは必ず守る)
    探し方は、1試合ずつ順番を決めていく深さ優先探索。候補は「連続出場にならない試合 → 長く待っているペアの試合」の順に試し、
    同じ条件の候補は乱数で並べるので、「決定」を押すたびに別の順番になる。 */
- 
+
 var MIN_PAIRS = 4, MAX_PAIRS = 12, DEFAULT_PAIRS = 6;
- 
+
 function shuffle(a) {
   for (var i = a.length - 1; i > 0; i--) {
     var j = Math.floor(Math.random() * (i + 1));
@@ -132,7 +129,7 @@ function shuffle(a) {
   }
   return a;
 }
- 
+
 // 連続出場は合計 maxC 回まで、待ちは maxW 試合まで、という条件で順番を1つ探す(見つからなければ null)
 function search(n, maxC, maxW, nodeLimit, maxD) {
   maxD = maxD || 1;
@@ -141,13 +138,13 @@ function search(n, maxC, maxW, nodeLimit, maxD) {
   var M = all.length;
   var used = new Array(M).fill(false), games = new Array(n).fill(0), last = new Array(n).fill(-1);
   var seq = [], nodes = 0, found = null;
- 
+
   function spread() {
     var mx = -1, mn = 1e9;
     for (var p = 0; p < n; p++) { if (games[p] > mx) mx = games[p]; if (games[p] < mn) mn = games[p]; }
     return mx - mn;
   }
- 
+
   function dfs(t, cons) {
     if (found || ++nodes > nodeLimit) return;
     if (t === M) { found = seq.slice(); return; }
@@ -184,7 +181,7 @@ function search(n, maxC, maxW, nodeLimit, maxD) {
   dfs(0, 0);
   return found;
 }
- 
+
 // 「最大待ち」になる場面の数(各ペアの待ちのうち、最大待ちと同じ長さのものを数える。最初の出番までの待ちも含む)
 function maxWaitCount(n, sched, maxW) {
   var last = new Array(n).fill(-1), cnt = 0;
@@ -196,7 +193,7 @@ function maxWaitCount(n, sched, maxW) {
   });
   return cnt;
 }
- 
+
 // 決まった条件(連続出場 maxC 回まで・最大待ち maxW・試合数の差 maxD 以内)のもとで、
 // 「最大待ちになる回数」が最も少ない順番を探す(分枝限定法)。
 // 候補は「連続出場にならない → この試合で最大待ちにならない → 長く待っているペア」の順に試し、
@@ -251,7 +248,7 @@ function optimize(n, maxC, maxW, maxD, timeMs, seed) {
   }
   return { seq: best, count: bestCnt, leaves: leaves };
 }
- 
+
 // 1. 連続出場の回数 → 2. 最大待ち の順に、できるだけ厳しい条件で探して、その値を決める。
 // 3. 決まった条件のまま、残りの時間で「最大待ちになる回数」が最も少ない順番を探す。
 // maxD は、途中で打ち切ったときに許す消化試合数の差(ふつうは1。「全試合消化する」ときは2)。
@@ -280,7 +277,19 @@ function makeSchedule(n, budgetMs, maxD) {
   });
   return { schedule: sched };
 }
- 
+
+// ペアごとに、全体の最大待ち(maxW 試合)になった回数を数える
+function maxWaitPer(n, sched, maxW) {
+  var last = new Array(n).fill(-1), cnt = new Array(n).fill(0);
+  sched.forEach(function (m, t) {
+    m.forEach(function (p) {
+      if (t - last[p] - 1 === maxW) cnt[p]++;
+      last[p] = t;
+    });
+  });
+  return cnt;
+}
+
 function stats(n, sched) {
   var games = new Array(n).fill(0), last = new Array(n).fill(-1), maxWait = new Array(n).fill(0), cons = new Array(n).fill(0);
   var maxSpread = 0;
@@ -297,16 +306,16 @@ function stats(n, sched) {
   });
   var mw = Math.max.apply(null, maxWait);
   return { games: games, maxWait: maxWait, cons: cons, maxSpread: maxSpread,
-           maxW: mw, maxWCount: maxWaitCount(n, sched, mw) };
+           maxW: mw, maxWCount: maxWaitCount(n, sched, mw), maxWPer: maxWaitPer(n, sched, mw) };
 }
- 
+
 /* ===== 画面 ===== */
- 
+
 if (typeof document !== "undefined") {
   var $ = function (id) { return document.getElementById(id); };
   var STORE_KEY = "tennis-pair-roundrobin-v1";
   var current = null; // { n, schedule: [[p, q], ...], checks: [] }
- 
+
   for (var k = MIN_PAIRS; k <= MAX_PAIRS; k++) {
     var op = document.createElement("option");
     op.value = String(k);
@@ -314,24 +323,24 @@ if (typeof document !== "undefined") {
     if (k === DEFAULT_PAIRS) op.selected = true;
     $("pairs").appendChild(op);
   }
- 
+
   function el(tag, cls, text) {
     var e = document.createElement(tag);
     if (cls) e.className = cls;
     if (text !== undefined) e.textContent = text;
     return e;
   }
- 
+
   function setMsg(text, isError) {
     $("msg").textContent = text;
     $("msg").className = isError ? "error" : "";
   }
- 
+
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(current)); return true; }
     catch (e) { return false; }
   }
- 
+
   function load() {
     try {
       var d = JSON.parse(localStorage.getItem(STORE_KEY));
@@ -352,21 +361,21 @@ if (typeof document !== "undefined") {
       return d;
     } catch (e) { return null; }
   }
- 
+
   function summaryText(s) {
     var cons = s.cons.reduce(function (x, y) { return x + y; }, 0);
     return "連続出場: " + (cons ? cons + "回" : "なし") + " / 最大待ち: " + s.maxW + "試合(" + s.maxWCount + "回) / 途中で打ち切ったときの消化試合数の差: 最大" + s.maxSpread;
   }
- 
+
   function render() {
     var d = current, n = d.n;
     var root = $("result");
     root.textContent = "";
     root.appendChild(el("h2", "", "対戦表(" + n + "組・" + d.schedule.length + "試合" + (d.full ? "・全試合消化" : "") + ")"));
- 
+
     var nextIdx = -1;
     for (var i = 0; i < d.schedule.length; i++) if (!d.checks[i]) { nextIdx = i; break; }
- 
+
     var tbl = el("table", "sched");
     var hr = el("tr");
     ["", "試合", "対戦", ""].forEach(function (h) { hr.appendChild(el("th", "", h)); });
@@ -401,16 +410,16 @@ if (typeof document !== "undefined") {
     var wrap = el("div", "card scroll");
     wrap.appendChild(tbl);
     root.appendChild(wrap);
- 
+
     // --- 偏りのチェック ---
     var s = stats(n, d.schedule);
     root.appendChild(el("h2", "", "偏りのチェック"));
     var box = el("div", "card");
     box.appendChild(el("div", "dist", summaryText(s)));
     var t2 = el("table");
-    var rows = [["ペア"], ["試合数"], ["最大待ち"], ["連続出場"]];
+    var rows = [["ペア"], ["試合数"], ["最大待ち"], ["最大待ち(" + s.maxW + "試合)の回数"], ["連続出場"]];
     for (var p = 0; p < n; p++) {
-      rows[0].push(p + 1); rows[1].push(s.games[p]); rows[2].push(s.maxWait[p]); rows[3].push(s.cons[p]);
+      rows[0].push(p + 1); rows[1].push(s.games[p]); rows[2].push(s.maxWait[p]); rows[3].push(s.maxWPer[p]); rows[4].push(s.cons[p]);
     }
     rows.forEach(function (cells, ri) {
       var tr = el("tr");
@@ -421,12 +430,12 @@ if (typeof document !== "undefined") {
     w2.style.marginTop = "10px";
     w2.appendChild(t2);
     box.appendChild(w2);
-    box.appendChild(el("p", "note", "「最大待ち」は、そのペアが次の出番まで見て待つ試合数の最大です(最初の出番までを含みます)。かっこ内は、全ペアを通して最大待ちになった回数です。"));
+    box.appendChild(el("p", "note", "「最大待ち」は、そのペアが次の出番まで見て待つ試合数の最大です(最初の出番までを含みます)。「最大待ち(○試合)の回数」は、そのペアが全体の最大待ちと同じ長さだけ待った回数で、合計が上のかっこ内の回数になります。"));
     root.appendChild(box);
- 
+
     $("csv").disabled = false;
   }
- 
+
   $("form").addEventListener("submit", function (ev) {
     ev.preventDefault();
     var n = parseInt($("pairs").value, 10);
@@ -452,7 +461,7 @@ if (typeof document !== "undefined") {
       $("go").disabled = false;
     }, 30);
   });
- 
+
   // CSV: 1行1試合。成績は Excel で管理する前提で、ゲーム数の列は空けておく
   function buildCsv(d) {
     var lines = ["試合,ペア,ペア,ゲーム数,ゲーム数"];
@@ -461,7 +470,7 @@ if (typeof document !== "undefined") {
     });
     return lines.join("\r\n") + "\r\n";
   }
- 
+
   $("csv").addEventListener("click", function () {
     if (!current) return;
     // 先頭の BOM は、Excel で開いたときに日本語が文字化けしないようにするため
@@ -475,7 +484,7 @@ if (typeof document !== "undefined") {
     a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   });
- 
+
   // 前回の対戦表とチェックを復元
   current = load();
   if (current) {
@@ -488,4 +497,3 @@ if (typeof document !== "undefined") {
 </script>
 </body>
 </html>
- 
