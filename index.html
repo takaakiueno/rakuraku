@@ -1,0 +1,491 @@
+
+
+Index7 · HTML
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>テニス 固定ペア総当たり 対戦表</title>
+<style>
+  :root {
+    --bg: #f4f6f1;
+    --card: #ffffff;
+    --ink: #1d2a22;
+    --sub: #5d6b62;
+    --line: #dfe5dc;
+    --accent: #2f7a4f;
+    --accent-ink: #ffffff;
+    --soft: #e9f2ec;
+    --next: #fff4d6;
+    --warn: #b3402e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+    line-height: 1.6;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 16px; }
+  h2 { font-size: 17px; margin: 32px 0 12px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  #form { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
+  label.field { display: flex; flex-direction: column; font-size: 13px; color: var(--sub); gap: 4px; }
+  label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 15px; min-height: 42px; cursor: pointer; }
+  select {
+    font: inherit;
+    font-size: 16px;
+    color: var(--ink);
+    padding: 8px 10px;
+    width: 110px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #fff;
+  }
+  input[type=checkbox] { width: 18px; height: 18px; margin: 0; vertical-align: middle; cursor: pointer; accent-color: var(--accent); }
+  button {
+    font: inherit;
+    font-size: 16px;
+    padding: 9px 22px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-ink);
+    cursor: pointer;
+  }
+  button.sub { background: #fff; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  #msg { margin-top: 12px; font-size: 14px; min-height: 1.6em; }
+  #msg.error { color: var(--warn); }
+ 
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { border: 1px solid var(--line); padding: 3px 8px; text-align: center; white-space: nowrap; }
+  th { background: var(--soft); font-weight: 600; }
+  .dist { font-size: 14px; margin: 4px 0; }
+  .note { font-size: 13px; color: var(--sub); margin: 8px 0 0; }
+ 
+  table.sched { font-size: 16px; }
+  table.sched th, table.sched td { padding: 5px 14px; }
+  table.sched td.game { font-weight: 600; min-width: 120px; }
+  table.sched .vs { color: var(--sub); font-weight: 400; margin: 0 10px; }
+  table.sched tr.alt td { background: #fafbf9; }
+  table.sched td.chk { padding: 4px 10px; }
+  table.sched td.tag { font-size: 12px; color: var(--sub); min-width: 64px; }
+  table.sched tr.done td.game { color: #a9b3ac; font-weight: 400; }
+  table.sched tr.next td { background: var(--next); }
+  table.sched tr.next td.tag { color: #8a5a00; font-weight: 600; }
+ 
+  @media print {
+    body { background: #fff; }
+    .noprint { display: none !important; }
+    .card { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>テニス 固定ペア総当たり 対戦表</h1>
+ 
+  <div class="card noprint">
+    <form id="form">
+      <label class="field">組数
+        <select id="pairs"></select>
+      </label>
+      <label class="check"><input id="full" type="checkbox"> 全試合消化する(待ち時間を優先)</label>
+      <button id="go" type="submit">決定</button>
+      <button id="csv" type="button" class="sub" disabled>csv出力</button>
+    </form>
+    <p class="note">チェックすると、最後まで消化したときの待ちが少し減ります。途中で打ち切ると、試合数が2試合違うペアが出ることがあります。</p>
+    <div id="msg"></div>
+  </div>
+ 
+  <div id="result"></div>
+</main>
+ 
+<script>
+"use strict";
+ 
+/* ===== 対戦順の決め方 =====
+   n 組の総当たりは n(n-1)/2 試合。1面で1試合ずつ行うので、決めるのは「試合の順番」だけ。
+   次の3つの条件を、上から順に優先して満たす順番を探す。
+     1. 連続出場なし: 同じペアが2試合続けて出ない
+     2. 待ち時間が長すぎない: 次の出番まで待つ試合数の最大を小さく
+     3. 途中で打ち切っても公平: どの時点で終わっても、各ペアの消化試合数の差が1以内(これは必ず守る)
+   探し方は、1試合ずつ順番を決めていく深さ優先探索。候補は「連続出場にならない試合 → 長く待っているペアの試合」の順に試し、
+   同じ条件の候補は乱数で並べるので、「決定」を押すたびに別の順番になる。 */
+ 
+var MIN_PAIRS = 4, MAX_PAIRS = 12, DEFAULT_PAIRS = 6;
+ 
+function shuffle(a) {
+  for (var i = a.length - 1; i > 0; i--) {
+    var j = Math.floor(Math.random() * (i + 1));
+    var t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+ 
+// 連続出場は合計 maxC 回まで、待ちは maxW 試合まで、という条件で順番を1つ探す(見つからなければ null)
+function search(n, maxC, maxW, nodeLimit, maxD) {
+  maxD = maxD || 1;
+  var all = [];
+  for (var a = 0; a < n; a++) for (var b = a + 1; b < n; b++) all.push([a, b]);
+  var M = all.length;
+  var used = new Array(M).fill(false), games = new Array(n).fill(0), last = new Array(n).fill(-1);
+  var seq = [], nodes = 0, found = null;
+ 
+  function spread() {
+    var mx = -1, mn = 1e9;
+    for (var p = 0; p < n; p++) { if (games[p] > mx) mx = games[p]; if (games[p] < mn) mn = games[p]; }
+    return mx - mn;
+  }
+ 
+  function dfs(t, cons) {
+    if (found || ++nodes > nodeLimit) return;
+    if (t === M) { found = seq.slice(); return; }
+    // 待ちが上限に達したペアは、次の試合に必ず出す
+    var must = [];
+    for (var p = 0; p < n; p++) if (games[p] < n - 1 && t - last[p] - 1 >= maxW) must.push(p);
+    if (must.length > 2) return;
+    var cand = [];
+    for (var i = 0; i < M; i++) {
+      if (used[i]) continue;
+      var x = all[i][0], y = all[i][1];
+      var okMust = true;
+      for (var k = 0; k < must.length; k++) if (must[k] !== x && must[k] !== y) okMust = false;
+      if (!okMust) continue;
+      var c = 0;
+      if (t > 0) { var pr = seq[t - 1]; if (pr[0] === x || pr[1] === x) c++; if (pr[0] === y || pr[1] === y) c++; }
+      if (cons + c > maxC) continue;
+      games[x]++; games[y]++;
+      var ok = spread() <= maxD;
+      games[x]--; games[y]--;
+      if (!ok) continue;
+      cand.push({ i: i, c: c, key: Math.min(last[x], last[y]) + Math.random() * 0.5 });
+    }
+    cand.sort(function (u, v) { return (u.c - v.c) || (u.key - v.key); });
+    for (var q = 0; q < cand.length; q++) {
+      var ci = cand[q].i, a1 = all[ci][0], b1 = all[ci][1];
+      var la = last[a1], lb = last[b1];
+      used[ci] = true; games[a1]++; games[b1]++; last[a1] = t; last[b1] = t; seq.push(all[ci]);
+      dfs(t + 1, cons + cand[q].c);
+      seq.pop(); last[a1] = la; last[b1] = lb; games[a1]--; games[b1]--; used[ci] = false;
+      if (found) return;
+    }
+  }
+  dfs(0, 0);
+  return found;
+}
+ 
+// 「最大待ち」になる場面の数(各ペアの待ちのうち、最大待ちと同じ長さのものを数える。最初の出番までの待ちも含む)
+function maxWaitCount(n, sched, maxW) {
+  var last = new Array(n).fill(-1), cnt = 0;
+  sched.forEach(function (m, t) {
+    m.forEach(function (p) {
+      if (t - last[p] - 1 === maxW) cnt++;
+      last[p] = t;
+    });
+  });
+  return cnt;
+}
+ 
+// 決まった条件(連続出場 maxC 回まで・最大待ち maxW・試合数の差 maxD 以内)のもとで、
+// 「最大待ちになる回数」が最も少ない順番を探す(分枝限定法)。
+// 候補は「連続出場にならない → この試合で最大待ちにならない → 長く待っているペア」の順に試し、
+// それまでの最良より回数が増えた時点で打ち切る。乱数を変えて時間いっぱい繰り返す。
+function optimize(n, maxC, maxW, maxD, timeMs, seed) {
+  var all = [];
+  for (var a = 0; a < n; a++) for (var b = a + 1; b < n; b++) all.push([a, b]);
+  var M = all.length, end = Date.now() + timeMs;
+  var best = seed ? seed.slice() : null;
+  var bestCnt = seed ? maxWaitCount(n, seed, maxW) : Infinity;
+  var leaves = 0;
+  while (Date.now() < end && bestCnt > 0) {
+    var used = new Array(M).fill(false), games = new Array(n).fill(0), last = new Array(n).fill(-1);
+    var seq = [], nodes = 0, stop = false, limit = 30000;
+    var dfs = function (t, cnt, cons) {
+      if (stop) return;
+      if (++nodes > limit || ((nodes & 1023) === 0 && Date.now() > end)) { stop = true; return; }
+      if (cnt >= bestCnt) return;
+      if (t === M) { best = seq.slice(); bestCnt = cnt; leaves++; return; }
+      var must = [];
+      for (var p = 0; p < n; p++) if (games[p] < n - 1 && t - last[p] - 1 >= maxW) must.push(p);
+      if (must.length > 2) return;
+      var cand = [];
+      for (var i = 0; i < M; i++) {
+        if (used[i]) continue;
+        var x = all[i][0], y = all[i][1];
+        var okMust = true;
+        for (var k = 0; k < must.length; k++) if (must[k] !== x && must[k] !== y) okMust = false;
+        if (!okMust) continue;
+        var c = 0;
+        if (t > 0) { var pr = seq[t - 1]; if (pr[0] === x || pr[1] === x) c++; if (pr[0] === y || pr[1] === y) c++; }
+        if (cons + c > maxC) continue;
+        games[x]++; games[y]++;
+        var mx = -1, mn = 1e9;
+        for (var q = 0; q < n; q++) { if (games[q] > mx) mx = games[q]; if (games[q] < mn) mn = games[q]; }
+        games[x]--; games[y]--;
+        if (mx - mn > maxD) continue;
+        var add = (t - last[x] - 1 === maxW ? 1 : 0) + (t - last[y] - 1 === maxW ? 1 : 0);
+        cand.push({ i: i, c: c, add: add, key: Math.min(last[x], last[y]) + Math.random() * 0.9 });
+      }
+      cand.sort(function (u, v) { return (u.c - v.c) || (u.add - v.add) || (u.key - v.key); });
+      for (var r = 0; r < cand.length; r++) {
+        var ci = cand[r].i, a1 = all[ci][0], b1 = all[ci][1], la = last[a1], lb = last[b1];
+        used[ci] = true; games[a1]++; games[b1]++; last[a1] = t; last[b1] = t; seq.push(all[ci]);
+        dfs(t + 1, cnt + cand[r].add, cons + cand[r].c);
+        seq.pop(); last[a1] = la; last[b1] = lb; games[a1]--; games[b1]--; used[ci] = false;
+        if (stop) return;
+      }
+    };
+    dfs(0, 0, 0);
+    if (!stop) break; // 打ち切らずに最後まで調べ終えた = これ以上少ない順番はない
+  }
+  return { seq: best, count: bestCnt, leaves: leaves };
+}
+ 
+// 1. 連続出場の回数 → 2. 最大待ち の順に、できるだけ厳しい条件で探して、その値を決める。
+// 3. 決まった条件のまま、残りの時間で「最大待ちになる回数」が最も少ない順番を探す。
+// maxD は、途中で打ち切ったときに許す消化試合数の差(ふつうは1。「全試合消化する」ときは2)。
+function makeSchedule(n, budgetMs, maxD) {
+  budgetMs = budgetMs || 1500;
+  maxD = maxD || 1;
+  var start = Date.now();
+  var lowW = Math.ceil(n / 2) - 1; // 待ちの理論上の下限
+  var first = null, bestC = 0, bestW = 0;
+  outer:
+  for (var c = 0; c <= n * n; c++) {
+    for (var w = lowW; w <= n * n; w++) {
+      for (var tr = 0; tr < 30; tr++) {
+        var s = search(n, c, w, 20000, maxD);
+        if (s) { first = s; bestC = c; bestW = w; break outer; }
+      }
+    }
+  }
+  if (!first) return null;
+  var opt = optimize(n, bestC, bestW, maxD, Math.max(0, budgetMs - (Date.now() - start)), first);
+  // 番号の振り方も乱数で入れ替えて、毎回ちがう表にする
+  var perm = shuffle(Array.from({ length: n }, function (_, k) { return k; }));
+  var sched = opt.seq.map(function (m) {
+    var p = perm[m[0]], q = perm[m[1]];
+    return p < q ? [p, q] : [q, p];
+  });
+  return { schedule: sched };
+}
+ 
+function stats(n, sched) {
+  var games = new Array(n).fill(0), last = new Array(n).fill(-1), maxWait = new Array(n).fill(0), cons = new Array(n).fill(0);
+  var maxSpread = 0;
+  sched.forEach(function (m, t) {
+    m.forEach(function (p) {
+      var w = t - last[p] - 1;
+      if (w > maxWait[p]) maxWait[p] = w;
+      if (last[p] === t - 1 && t > 0) cons[p]++;
+      last[p] = t;
+      games[p]++;
+    });
+    var mx = Math.max.apply(null, games), mn = Math.min.apply(null, games);
+    if (mx - mn > maxSpread) maxSpread = mx - mn;
+  });
+  var mw = Math.max.apply(null, maxWait);
+  return { games: games, maxWait: maxWait, cons: cons, maxSpread: maxSpread,
+           maxW: mw, maxWCount: maxWaitCount(n, sched, mw) };
+}
+ 
+/* ===== 画面 ===== */
+ 
+if (typeof document !== "undefined") {
+  var $ = function (id) { return document.getElementById(id); };
+  var STORE_KEY = "tennis-pair-roundrobin-v1";
+  var current = null; // { n, schedule: [[p, q], ...], checks: [] }
+ 
+  for (var k = MIN_PAIRS; k <= MAX_PAIRS; k++) {
+    var op = document.createElement("option");
+    op.value = String(k);
+    op.textContent = String(k);
+    if (k === DEFAULT_PAIRS) op.selected = true;
+    $("pairs").appendChild(op);
+  }
+ 
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+ 
+  function setMsg(text, isError) {
+    $("msg").textContent = text;
+    $("msg").className = isError ? "error" : "";
+  }
+ 
+  function save() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(current)); return true; }
+    catch (e) { return false; }
+  }
+ 
+  function load() {
+    try {
+      var d = JSON.parse(localStorage.getItem(STORE_KEY));
+      if (!d || !(d.n >= MIN_PAIRS && d.n <= MAX_PAIRS) || !Array.isArray(d.schedule)) return null;
+      if (d.schedule.length !== d.n * (d.n - 1) / 2) return null;
+      var seen = {};
+      var ok = d.schedule.every(function (m) {
+        if (!Array.isArray(m) || m.length !== 2) return false;
+        var a = m[0], b = m[1];
+        if (!(Number.isInteger(a) && Number.isInteger(b) && a >= 0 && b < d.n && a < b)) return false;
+        var key = a + "-" + b;
+        if (seen[key]) return false;
+        seen[key] = true;
+        return true;
+      });
+      if (!ok) return null;
+      if (!Array.isArray(d.checks)) d.checks = [];
+      return d;
+    } catch (e) { return null; }
+  }
+ 
+  function summaryText(s) {
+    var cons = s.cons.reduce(function (x, y) { return x + y; }, 0);
+    return "連続出場: " + (cons ? cons + "回" : "なし") + " / 最大待ち: " + s.maxW + "試合(" + s.maxWCount + "回) / 途中で打ち切ったときの消化試合数の差: 最大" + s.maxSpread;
+  }
+ 
+  function render() {
+    var d = current, n = d.n;
+    var root = $("result");
+    root.textContent = "";
+    root.appendChild(el("h2", "", "対戦表(" + n + "組・" + d.schedule.length + "試合" + (d.full ? "・全試合消化" : "") + ")"));
+ 
+    var nextIdx = -1;
+    for (var i = 0; i < d.schedule.length; i++) if (!d.checks[i]) { nextIdx = i; break; }
+ 
+    var tbl = el("table", "sched");
+    var hr = el("tr");
+    ["", "試合", "対戦", ""].forEach(function (h) { hr.appendChild(el("th", "", h)); });
+    tbl.appendChild(hr);
+    d.schedule.forEach(function (m, t) {
+      var tr = el("tr", t % 2 === 0 ? "alt" : "");
+      if (d.checks[t]) tr.classList.add("done");
+      if (t === nextIdx) tr.classList.add("next");
+      var chkCell = el("td", "chk");
+      var chk = el("input");
+      chk.type = "checkbox";
+      chk.setAttribute("aria-label", "第" + (t + 1) + "試合");
+      chk.checked = !!d.checks[t];
+      chk.addEventListener("change", function () {
+        d.checks[t] = chk.checked;
+        save();
+        render();
+        var boxes = document.querySelectorAll("table.sched td.chk input");
+        if (boxes[t]) boxes[t].focus();
+      });
+      chkCell.appendChild(chk);
+      tr.appendChild(chkCell);
+      tr.appendChild(el("th", "", t + 1));
+      var g = el("td", "game");
+      g.appendChild(document.createTextNode(m[0] + 1));
+      g.appendChild(el("span", "vs", "-"));
+      g.appendChild(document.createTextNode(m[1] + 1));
+      tr.appendChild(g);
+      tr.appendChild(el("td", "tag", t === nextIdx ? "次の試合" : ""));
+      tbl.appendChild(tr);
+    });
+    var wrap = el("div", "card scroll");
+    wrap.appendChild(tbl);
+    root.appendChild(wrap);
+ 
+    // --- 偏りのチェック ---
+    var s = stats(n, d.schedule);
+    root.appendChild(el("h2", "", "偏りのチェック"));
+    var box = el("div", "card");
+    box.appendChild(el("div", "dist", summaryText(s)));
+    var t2 = el("table");
+    var rows = [["ペア"], ["試合数"], ["最大待ち"], ["連続出場"]];
+    for (var p = 0; p < n; p++) {
+      rows[0].push(p + 1); rows[1].push(s.games[p]); rows[2].push(s.maxWait[p]); rows[3].push(s.cons[p]);
+    }
+    rows.forEach(function (cells, ri) {
+      var tr = el("tr");
+      cells.forEach(function (v, ci) { tr.appendChild(el(ri === 0 || ci === 0 ? "th" : "td", "", v)); });
+      t2.appendChild(tr);
+    });
+    var w2 = el("div", "scroll");
+    w2.style.marginTop = "10px";
+    w2.appendChild(t2);
+    box.appendChild(w2);
+    box.appendChild(el("p", "note", "「最大待ち」は、そのペアが次の出番まで見て待つ試合数の最大です(最初の出番までを含みます)。かっこ内は、全ペアを通して最大待ちになった回数です。"));
+    root.appendChild(box);
+ 
+    $("csv").disabled = false;
+  }
+ 
+  $("form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var n = parseInt($("pairs").value, 10);
+    if (current && current.checks.some(Boolean) &&
+        !window.confirm("いまの対戦表とチェックを消して、新しく作り直します。よろしいですか?")) return;
+    setMsg("作成中…", false);
+    $("go").disabled = true;
+    setTimeout(function () {
+      try {
+        var full = $("full").checked;
+        var out = makeSchedule(n, full ? 3000 : 1500, full ? 2 : 1);
+        if (!out) { setMsg("対戦表を作れませんでした。もう一度「決定」を押してください。", true); }
+        else {
+          current = { n: n, full: full, schedule: out.schedule, checks: [] };
+          var saved = save();
+          render();
+          setMsg("作成しました。もう一度「決定」を押すと別の順番を作ります。" +
+            (saved ? "" : " ※このブラウザでは保存できないため、再読み込みすると消えます。"), false);
+        }
+      } catch (e) {
+        setMsg("エラーが発生しました: " + e.message, true);
+      }
+      $("go").disabled = false;
+    }, 30);
+  });
+ 
+  // CSV: 1行1試合。成績は Excel で管理する前提で、ゲーム数の列は空けておく
+  function buildCsv(d) {
+    var lines = ["試合,ペア,ペア,ゲーム数,ゲーム数"];
+    d.schedule.forEach(function (m, t) {
+      lines.push((t + 1) + "," + (m[0] + 1) + "," + (m[1] + 1) + ",,");
+    });
+    return lines.join("\r\n") + "\r\n";
+  }
+ 
+  $("csv").addEventListener("click", function () {
+    if (!current) return;
+    // 先頭の BOM は、Excel で開いたときに日本語が文字化けしないようにするため
+    var blob = new Blob(["﻿" + buildCsv(current)], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "tennis_soatari.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  });
+ 
+  // 前回の対戦表とチェックを復元
+  current = load();
+  if (current) {
+    $("pairs").value = String(current.n);
+    $("full").checked = !!current.full;
+    render();
+    setMsg("前回の対戦表を表示しています。「決定」を押すと新しく作り直します。", false);
+  }
+}
+</script>
+</body>
+</html>
+ 
