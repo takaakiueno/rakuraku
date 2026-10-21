@@ -1,6 +1,6 @@
 # テニス 固定ペア総当たり 対戦表
 
-**ここから使えます → https://takaakiueno.github.io/tennis_round7/index.html**
+**ここから使えます → https://takaakiueno.github.io/rakuraku/index.html**
 
 ## 概要
 
